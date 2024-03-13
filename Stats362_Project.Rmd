@@ -1,0 +1,321 @@
+---
+title: "Stats 362 Final Project"
+output: html_notebook
+---
+
+Will Hartog
+12 March 2024
+
+```{r}
+
+library(ggplot2)
+
+```
+# Simulating the Interval
+
+```{r}
+
+draw_x = function(bern = 1, p = 0.5, a = 1, b = 1) {
+  if (bern) {
+    return((runif(1) < p))
+  } else {
+    return(rbeta(1, a, b))
+  }
+}
+
+sim_interval = function(bern = 1, N = 1000, p = 0.5, a = 1, b = 1, g = 10, alpha = 0.05, theta = 0.5, c = 0.5) {
+  K_min = replicate(g+1, 1)
+  K_max = replicate(g+1, 1)
+  K_tot = replicate(g+1, 1)
+  mu_hat = 0.5
+  sigma_hat2 = 0.25
+  lambda = 0
+  ms = (c(1:(g+1)) - 1)/g
+  uppers = c()
+  lowers = c()
+  for (i in c(1:N)) {
+    x = draw_x(bern, p, a, b)
+    mu_hat = mu_hat * i/(i+1) + x/(i+1)
+    sigma_hat2 = sigma_hat2 * i / (i+1) + (x - mu_hat) ** 2 / (i+1)
+    
+    K_min = K_min * (1 - pmin(lambda, c/ms) * (x - ms))
+    K_max = K_max * (1 + pmin(lambda, c/(1-ms)) * (x - ms))
+    K_tot = pmax(theta * K_max, (1 - theta) * K_min)
+    
+    int = which((K_tot < 1/alpha))
+    uppers = c(uppers, (max(int) - 1)/g)
+    lowers = c(lowers, (min(int) - 1)/g)
+    
+    lambda = sqrt(2 * log(2/alpha) / (sigma_hat2 * i * log(i+1)))
+  }
+  return(data.frame(uppers, lowers))
+}
+
+```
+
+```{r}
+
+sim = sim_interval(g = 1000, N = 1000, bern = 0, c = 0.75)
+sim$trials = c(1:nrow(sim))
+
+ggplot(data = sim, mapping = aes(x = trials)) + geom_line(aes(y = lowers)) + geom_line(aes(y = uppers))
+
+```
+
+# Simulating the Stopping Time
+
+This function takes a granularity $g$ and target interval width and computes the amount of time to get there (and whether the true mean was covered).
+
+```{r}
+
+sim_to_width = function(bern = 1, p = 0.5, a = 1, b = 1, g = 10, alpha = 0.05, theta = 0.5, c = 0.5, target = 0.1) {
+  K_min = replicate(g+1, 1)
+  K_max = replicate(g+1, 1)
+  K_tot = replicate(g+1, 1)
+  mu = bern * p + (1-bern) * a/(a+b)
+  mu_hat = 0.5
+  sigma_hat2 = 0.25
+  lambda = 0
+  ms = (c(1:(g+1)) - 1)/g
+  upper = 1
+  lower = 0
+  i = 0
+  while ((upper - lower) > target) {
+    i = i + 1
+    x = draw_x(bern, p, a, b)
+    mu_hat = mu_hat * i/(i+1) + x/(i+1)
+    sigma_hat2 = sigma_hat2 * i / (i+1) + (x - mu_hat) ** 2 / (i+1)
+    
+    K_min = K_min * (1 - pmin(lambda, c/ms) * (x - ms))
+    K_max = K_max * (1 + pmin(lambda, c/(1-ms)) * (x - ms))
+    K_tot = pmax(theta * K_max, (1 - theta) * K_min)
+    
+    int = which((K_tot < 1/alpha))
+    upper = (max(int) - 1)/g
+    lower = (min(int) - 1)/g
+    
+    
+    lambda = sqrt(2 * log(2/alpha) / (sigma_hat2 * i * log(i+1)))
+  }
+  contain = (mu <= upper) & (mu >= lower)
+  return(c(i, contain))
+}
+
+```
+
+This function just assumes we want to get the interval within target/2 on both sides of the mean, which is not always what we want but is simpler and faster to run.
+
+```{r}
+
+sim_to_fixed = function(bern = 1, p = 0.5, a = 1, b = 1, alpha = 0.05, theta = 0.5, c = 0.5, target = 0.1) {
+  K_min = replicate(2, 1)
+  K_max = replicate(2, 1)
+  K_tot = replicate(2, 1)
+  mu = bern * p + (1-bern) * a/(a+b)
+  mu_hat = 0.5
+  sigma_hat2 = 0.25
+  lambda = 0
+  ms = 0.5 + c(-1, 1) * target/2
+  i = 0
+  while (min(K_tot) <= 1/alpha) {
+    i = i + 1
+    x = draw_x(bern, p, a, b)
+    mu_hat = mu_hat * i/(i+1) + x/(i+1)
+    sigma_hat2 = sigma_hat2 * i / (i+1) + (x - mu_hat) ** 2 / (i+1)
+    
+    K_min = K_min * (1 - pmin(lambda, c/ms) * (x - ms))
+    K_max = K_max * (1 + pmin(lambda, c/(1-ms)) * (x - ms))
+    K_tot = pmax(theta * K_max, (1 - theta) * K_min)
+    
+    
+    lambda = sqrt(2 * log(2/alpha) / (sigma_hat2 * i * log(i+1)))
+    # in case we flame out
+    if (min(K_tot) == 0) {
+      return(Inf)
+    }
+  }
+  return(i)
+}
+
+```
+
+# Bernoulli Analysis
+
+```{r}
+
+counts_0.5 = replicate(1000, sim_to_fixed(target = 0.2))
+
+hist(counts_0.5)
+mean(counts_0.5)
+sd(counts_0.5)
+
+
+```
+
+```{r}
+
+counts_0.75 = replicate(1000, sim_to_fixed(c = 0.75, target = 0.2))
+
+hist(counts_0.75)
+mean(counts_0.75)
+sd(counts_0.75)
+
+
+```
+
+```{r}
+
+counts2 = c()
+num_contain = 0
+for (i in c(1:1000)) {
+  sim = sim_to_width(c = 0.75)
+  num_contain = num_contain + sim[2]
+  counts2 = c(counts2, sim[1])
+}
+
+print(num_contain / 1000)
+
+counts_0.75 = counts2
+hist(counts_0.75)
+mean(counts_0.75)
+
+```
+
+```{r}
+
+num_iter = 1000
+
+cs = seq(from = 0.1, to = 0.9, by = 0.01)
+
+means = c()
+sds = c()
+
+for (c in cs) {
+  counts_c = replicate(num_iter, sim_to_fixed(c = c, target = 0.2))
+  means = c(means, mean(counts_c))
+  sds = c(sds, sd(counts_c))
+  print(c)
+}
+
+```
+
+```{r}
+
+c_df = data.frame(cs, means, sds)
+
+ggplot(data = c_df, aes(x = cs, y = means)) + geom_line() + geom_ribbon(aes(ymin = means - 2.576 * sds/sqrt(num_iter), ymax = means + 2.576 * sds/sqrt(num_iter)), alpha = 0.3)
+
+
+```
+
+# Beta Analysis
+
+```{r}
+
+counts_0.5_unif = replicate(1000, sim_to_fixed(bern = 0, target = 0.2))
+
+hist(counts_0.5_unif)
+mean(counts_0.5_unif)
+sd(counts_0.5_unif)
+
+counts_0.75_unif = replicate(1000, sim_to_fixed(bern = 0, target = 0.2, c = 0.75))
+
+hist(counts_0.75_unif)
+mean(counts_0.75_unif)
+sd(counts_0.75_unif)
+
+
+```
+
+```{r}
+
+means_unif = c()
+sds_unif = c()
+
+for (c in cs) {
+  counts_c = replicate(num_iter, sim_to_fixed(c = c, target = 0.2, bern = 0))
+  means_unif = c(means_unif, mean(counts_c))
+  sds_unif = c(sds_unif, sd(counts_c))
+  print(c)
+}
+
+```
+
+```{r}
+
+c_df_unif = data.frame(cs, means_unif, sds_unif)
+
+ggplot(data = c_df_unif, aes(x = cs, y = means_unif)) + geom_line() + geom_ribbon(aes(ymin = means_unif - 2.576 * sds_unif/sqrt(num_iter), ymax = means_unif + 2.576 * sds_unif/sqrt(num_iter)), alpha = 0.3)
+
+
+```
+
+```{r}
+
+means_beta = c()
+sds_beta = c()
+
+for (c in cs) {
+  counts_c = replicate(num_iter, sim_to_fixed(c = c, target = 0.2, bern = 0, a = 5, b = 5))
+  means_beta = c(means_beta, mean(counts_c))
+  sds_beta = c(sds_beta, sd(counts_c))
+  print(c)
+}
+
+```
+
+
+```{r}
+
+c_df_beta = data.frame(cs, means_beta, sds_beta)
+
+ggplot(data = c_df_beta, aes(x = cs, y = means_beta)) + geom_line() + geom_ribbon(aes(ymin = means_beta - 2.576 * sds_beta/sqrt(num_iter), ymax = means_beta + 2.576 * sds_beta/sqrt(num_iter)), alpha = 0.3)
+
+
+```
+
+```{r}
+
+counts_1_beta = replicate(1000, sim_to_fixed(bern = 0, target = 0.2, c = 1, a = 5, b = 5))
+
+hist(counts_1_beta)
+mean(counts_1_beta)
+sd(counts_1_beta)
+
+```
+
+```{r}
+
+means_beta2 = c()
+sds_beta2 = c()
+
+for (c in cs) {
+  counts_c = replicate(num_iter, sim_to_fixed(c = c, target = 0.2, bern = 0, a = 2, b = 2))
+  means_beta2 = c(means_beta2, mean(counts_c))
+  sds_beta2 = c(sds_beta2, sd(counts_c))
+  print(c)
+}
+
+```
+
+
+```{r}
+
+c_df_beta2 = data.frame(cs, means_beta2, sds_beta2)
+
+ggplot(data = c_df_beta2, aes(x = cs, y = means_beta2)) + geom_line() + geom_ribbon(aes(ymin = means_beta2 - 2.576 * sds_beta2/sqrt(num_iter), ymax = means_beta2 + 2.576 * sds_beta2/sqrt(num_iter)), alpha = 0.3)
+
+
+```
+
+```{r}
+
+df_total = data.frame(cs, means, sds, means_unif, sds_unif, means_beta, sds_beta, means_beta2, sds_beta2)
+
+View(df_total)
+colnames(df_total)[6] = 'means_beta5'
+colnames(df_total)[7] = 'sds_beta5'
+
+write.csv(df_total, 'stats_362_sims.csv')
+
+```
