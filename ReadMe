@@ -1,0 +1,4 @@
+# The .csv contains a dataframe which has rows corresponding to a value of the constant c, 
+# and columns corresponding to, in order, the means and standard deviations for the stopping times
+# for 1000 runs of the sequential confidence intervals with Bernoulli(0.5), Uniform, Beta(5,5), and Beta(2,2)
+# data, respectively. The simulations were done according to the project code, which is described in the write-up
